@@ -1,4 +1,5 @@
 use egui::Context;
+use log::warn;
 use poll_promise::Promise;
 use std::future::Future;
 #[cfg(target_family = "unix")]
@@ -25,9 +26,12 @@ pub struct ThreadHandler<T: Send + 'static> {
 impl<T: Send + 'static> ThreadHandler<T> {
     /// executes async function and stores result in task
     #[cfg(target_arch = "wasm32")]
-    pub fn new_async<A: Future<Output=T> + 'static>(future: A) -> Self {
+    pub fn new_async_ctx<A: Future<Output = T> + 'static>(
+        future: A,
+        ctx: Option<&Context>,
+    ) -> Self {
         let (sender, promise) = Promise::new();
-        let ctx =Arc::new(Mutex::new(None::<Context>));
+        let ctx = Arc::new(Mutex::new(ctx.cloned()));
         let ctx_move = ctx.clone();
         spawn_local(async move {
             let res = future.await;
@@ -35,18 +39,26 @@ impl<T: Send + 'static> ThreadHandler<T> {
             let is_ctx = ctx_move.lock().unwrap().is_some();
             if is_ctx {
                 ctx_move.lock().unwrap().as_ref().unwrap().request_repaint();
+            } else {
+                warn!("ctx wasnt set")
             }
         });
         Self { task: promise, ctx }
     }
 
     /// executes async function and stores result in task
+    pub fn new_async<A: Future<Output = T> + 'static + Send>(future: A) -> Self {
+        Self::new_async_ctx(future, None)
+    }
+
+    /// executes async function and stores result in task
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn new_async<A: Future<Output=T> + 'static + Send>(
+    pub fn new_async_ctx<A: Future<Output = T> + 'static + Send>(
         future: A,
+        ctx: Option<&Context>,
     ) -> Self {
         let (sender, promise) = Promise::new();
-        let ctx = Arc::new(Mutex::new(None::<Context>));
+        let ctx = Arc::new(Mutex::new(ctx.cloned()));
         let ctx_move = ctx.clone();
         let handle = tokio::spawn(async move {
             let res = future.await;
@@ -54,6 +66,8 @@ impl<T: Send + 'static> ThreadHandler<T> {
             let is_ctx = ctx_move.lock().unwrap().is_some();
             if is_ctx {
                 ctx_move.lock().unwrap().as_ref().unwrap().request_repaint();
+            } else {
+                warn!("ctx wasnt set")
             }
         });
 
@@ -66,25 +80,32 @@ impl<T: Send + 'static> ThreadHandler<T> {
 
     /// executes sync function in async thread and stores result in task
     #[cfg(target_arch = "wasm32")]
-    pub fn new<A: 'static + Send + FnOnce() -> T>(func: A) -> Self {
+    pub fn new_ctx<A: 'static + Send + FnOnce() -> T>(func: A, ctx: Option<&Context>) -> Self {
         let (sender, promise) = Promise::new();
-        let ctx = Arc::new(Mutex::new(None::<Context>));
+        let ctx = Arc::new(Mutex::new(ctx.cloned()));
         let ctx_move = ctx.clone();
         spawn_local(async move {
             sender.send(func());
             let is_ctx = ctx_move.lock().unwrap().is_some();
             if is_ctx {
                 ctx_move.lock().unwrap().as_ref().unwrap().request_repaint();
+            } else {
+                warn!("ctx wasnt set")
             }
         });
         Self { task: promise, ctx }
     }
 
     /// executes sync function in a tokio(asnyc) thread and stores result in task
-    #[cfg(not(target_arch = "wasm32"))]
     pub fn new<A: FnOnce() -> T + 'static + Send>(func: A) -> Self {
+        Self::new_ctx(func, None)
+    }
+
+    /// executes sync function in a tokio(asnyc) thread and stores result in task
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn new_ctx<A: FnOnce() -> T + 'static + Send>(func: A, ctx: Option<&Context>) -> Self {
         let (sender, promise) = Promise::new();
-        let ctx =Arc::new(Mutex::new(None::<Context>));
+        let ctx = Arc::new(Mutex::new(ctx.cloned()));
         let ctx_move = ctx.clone();
         let handle = tokio::spawn(async move {
             let data = async { func() }.await;
@@ -92,6 +113,8 @@ impl<T: Send + 'static> ThreadHandler<T> {
             let is_ctx = ctx_move.lock().unwrap().is_some();
             if is_ctx {
                 ctx_move.lock().unwrap().as_ref().unwrap().request_repaint();
+            } else {
+                warn!("ctx wasnt set")
             }
         });
 
@@ -103,16 +126,23 @@ impl<T: Send + 'static> ThreadHandler<T> {
     }
 
     /// executes sync function in std thread and stores result in task
-    #[cfg(not(target_arch = "wasm32"))]
     pub fn new_sync<A: FnOnce() -> T + 'static + Send>(func: A) -> Self {
+        Self::new_sync_ctx(func, None)
+    }
+
+    /// executes sync function in std thread and stores result in task
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn new_sync_ctx<A: FnOnce() -> T + 'static + Send>(func: A, ctx: Option<&Context>) -> Self {
         let (sender, promise) = Promise::new();
-        let ctx = Arc::new(Mutex::new(None::<Context>));
+        let ctx = Arc::new(Mutex::new(ctx.cloned()));
         let ctx_move = ctx.clone();
         let handle = std::thread::spawn(move || {
             sender.send(func());
             let is_ctx = ctx_move.lock().unwrap().is_some();
             if is_ctx {
                 ctx_move.lock().unwrap().as_ref().unwrap().request_repaint();
+            } else {
+                warn!("ctx wasnt set")
             }
         });
 
@@ -130,8 +160,8 @@ impl<T: Send + 'static> ThreadHandler<T> {
     /// executes Self::new
     /// this function exists to prevent errors when compiling to native and web
     #[cfg(target_arch = "wasm32")]
-    pub fn new_sync<A: FnOnce() -> T + 'static + Send>(func: A) -> Self {
-        Self::new(func)
+    pub fn new_sync_ctx<A: FnOnce() -> T + 'static + Send>(func: A, ctx: Option<&Context>) -> Self {
+        Self::new_ctx(func, ctx)
     }
 
     /// kills running thread
