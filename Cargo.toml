@@ -1,13 +1,13 @@
 [package]
 name = "ethread"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 
 [dependencies]
-egui = "0.26.0"
+egui = "*"
 poll-promise = "0.3"
 log = "0.4.21"
 
